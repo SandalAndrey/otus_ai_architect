@@ -1,0 +1,55 @@
+# ============================================================================
+# Данные. Режим обращения — docs/02-data-sourcing-plan.md, раздел А.9.
+# Репозиторий публичный: реальные ПДн, закупочные цены и тексты договоров
+# не попадают сюда ни в каком виде, включая фикстуры и примеры.
+# ============================================================================
+data/
+!data/synthetic/
+!data/.gitkeep
+*.dump
+*.sql.gz
+
+# Прайсы и выгрузки, попавшие в рабочую директорию по ошибке
+*.xlsx
+*.xls
+*.tsv
+incoming/
+raw/
+
+# Секреты
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+
+# Веса моделей
+models/
+*.gguf
+*.safetensors
+*.bin
+
+# Материалы курса (авторские права OTUS)
+course/
+lectures/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.egg-info/
+dist/
+build/
+
+# Инструменты и ОС
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+desktop.ini
+~$*
