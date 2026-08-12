@@ -46,6 +46,9 @@ venv/
 dist/
 build/
 
+# Локально собранные PDF: документация ведётся в Markdown
+docs/pdf/
+
 # Инструменты и ОС
 .idea/
 .vscode/
