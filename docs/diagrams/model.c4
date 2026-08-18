@@ -1,0 +1,177 @@
+specification {
+  element actor {
+    style { shape person color secondary }
+  }
+  element techActor {
+    style { shape person color muted }
+  }
+  element system {
+    style { color primary }
+  }
+  element external {
+    style { color gray }
+  }
+  element container
+  element webapp {
+    style { shape browser }
+  }
+  element storage {
+    style { shape storage color green }
+  }
+  element gpu {
+    style { color indigo }
+  }
+}
+
+model {
+  // Роли, различающиеся уровнем доступа. Разграничение доступа - блокирующий
+  // критерий приёмки, поэтому на L1 они показаны раздельно.
+  buyer = actor 'Покупатель' {
+    description 'Спрашивает о совместимости, отличиях выпусков и наличии. Видит только открытые данные'
+  }
+  manager = actor 'Менеджер контакт-центра' {
+    description 'Отвечает на обращения. Видит остатки и историю заказов'
+  }
+  procurer = actor 'Закупщик' {
+    description 'Сопоставляет прайсы с ассортиментом. Единственный, кто видит закупочные цены и договоры'
+  }
+
+  // AI-специфичные роли. Без них на L1 забываются их доступы в контур.
+  expert = techActor 'Эксперт-товаровед' {
+    description 'Подтверждает слияния сущностей и ведёт золотой датасет'
+  }
+  aiEngineer = techActor 'AI-инженер' {
+    description 'Следит за метриками качества, промптами и регрессионными прогонами'
+  }
+
+  site = external 'Сайт интернет-магазина' {
+    description 'Каталог и карточки товаров. Встраивает виджет и передаёт роль пользователя'
+  }
+  erp = external 'Учётная система' {
+    description 'Остатки, заказы, сроки поставки'
+  }
+  priceFeed = external 'Канал прайсов поставщиков' {
+    description 'Почта и личные кабинеты: прайсы и каталоги в XLSX и PDF'
+  }
+
+  platform = system 'Платформа товарных знаний' {
+    description 'Отвечает на товарные вопросы, извлекая факты обходом графа знаний. Все модели исполняются внутри контура, обращений к внешним LLM-API нет'
+
+    widget = webapp 'Виджет ассистента' {
+      description 'Диалог на странице товара и в поиске. Публичный контур'
+      technology 'TypeScript'
+    }
+    workplace = webapp 'Рабочее место сотрудника' {
+      description 'Ответы, разбор прайсов, подтверждение слияний. Внутренний контур'
+      technology 'TypeScript'
+    }
+
+    api = container 'API-шлюз' {
+        description 'Аутентификация, определение роли, сессии, потоковая отдача ответа'
+      technology 'Python, FastAPI'
+    }
+    agent = container 'Сервис агента' {
+        description 'Конечный автомат обработки запроса: планирование, обход графа, самопроверка. Здесь же входные и выходные guardrails'
+      technology 'Python, LangGraph'
+    }
+    ingestion = gpu 'Конвейер загрузки' {
+        description 'Офлайн: разбор документов, распознавание сканов, извлечение сущностей, присвоение грифа. Требует GPU'
+      technology 'Python'
+    }
+
+    inference = gpu 'Сервис инференса' {
+        description 'Генерация ответа и построение эмбеддингов. Внутри контура, а не внешний провайдер. Требует GPU'
+      technology 'vLLM или llama.cpp'
+    }
+    graphdb = storage 'Граф знаний' {
+        description 'Product, Prototype, Party, Document. Метка ACL - обязательный атрибут узла'
+      technology 'Neo4j'
+    }
+    vectordb = storage 'Векторное хранилище' {
+        description 'Чанки с payload-фильтром по ACL, применяемым до ранжирования. Высокое потребление ОЗУ'
+      technology 'Qdrant'
+    }
+    opdb = storage 'Служебная база' {
+        description 'Сессии, аудит обращений, права, очередь позиций на подтверждение'
+      technology 'PostgreSQL'
+    }
+    blobs = storage 'Хранилище документов' {
+        description 'Оригиналы прайсов, каталогов и изображений'
+      technology 'S3-совместимое'
+    }
+
+    observability = container 'Контур наблюдаемости' {
+      description 'Трассы обработки запроса, метрики качества и потребления'
+      technology 'OpenTelemetry, Prometheus, Grafana'
+    }
+
+    widget -> api '1. Запрос пользователя' 'HTTPS / JSON'
+    workplace -> api '1. Запрос пользователя' 'HTTPS / JSON'
+    api -> agent '2. Передаёт запрос и разрешённые грифы' 'gRPC'
+
+    // Права применяются как предикат запроса к хранилищу, а не постобработкой.
+    agent -> vectordb '3. Поиск чанков с фильтром по ACL' 'gRPC'
+    agent -> graphdb '4. Обход графа с предикатом ACL' 'Bolt'
+    agent -> inference '5. Генерация ответа по извлечённым фактам' 'OpenAI-совместимый API'
+    agent -> opdb '6. Пишет аудит обращения' 'SQL'
+
+    // Офлайн-конвейер: тяжёлая обработка вынесена из онлайн-пути.
+    ingestion -> blobs 'Складывает оригиналы документов' 'S3 API'
+    ingestion -> inference 'Строит эмбеддинги, распознаёт изображения' 'OpenAI-совместимый API'
+    ingestion -> graphdb 'Создаёт узлы и связи, проставляет грифы' 'Bolt'
+    ingestion -> vectordb 'Обновляет индекс чанков' 'gRPC'
+    ingestion -> opdb 'Ставит позиции в очередь на подтверждение' 'SQL'
+
+    api -> observability 'Отдаёт трассы и метрики' 'OTLP'
+    agent -> observability 'Отдаёт трассы и метрики' 'OTLP'
+    ingestion -> observability 'Отдаёт метрики конвейера' 'OTLP'
+  }
+
+  buyer -> platform.widget 'Задаёт вопрос о товаре' 'HTTPS'
+  site -> platform.widget 'Встраивает виджет, передаёт роль пользователя' 'JS SDK'
+  manager -> platform.workplace 'Спрашивает о товаре, получает ответ со ссылками на источники' 'HTTPS'
+  procurer -> platform.workplace 'Загружает прайс, смотрит сопоставление с ассортиментом' 'HTTPS'
+  expert -> platform.workplace 'Подтверждает слияния, пополняет золотой датасет' 'HTTPS'
+  aiEngineer -> platform.observability 'Смотрит трассы и метрики качества' 'HTTPS'
+
+  platform.api -> erp 'Запрашивает остатки и сроки' 'REST'
+  platform.ingestion -> priceFeed 'Забирает прайсы и каталоги' 'IMAP / файловый обмен'
+  platform.ingestion -> site 'Забирает каталог и карточки' 'REST / выгрузка'
+}
+
+views {
+  // index - стартовое представление LikeC4. Если его не задать,
+  // инструмент создаст своё, и уровень 1 продублируется.
+  view index {
+    title 'Уровень 1. Контекст'
+    description 'Кто пользуется платформой и с чем она связана'
+    include buyer, manager, procurer, expert, aiEngineer, platform, site, erp, priceFeed
+  }
+
+  view L2_Containers of platform {
+    title 'Уровень 2. Контейнеры'
+    description 'Разделение Control Plane и Data Plane, офлайн-конвейер загрузки'
+
+    // group рисует рамку вокруг набора элементов. Задание требует именно
+    // разделения плоскостей, а тег дал бы только подпись на элементе.
+    //
+    // Две особенности, которые легко потерять при правке:
+    // 1. Элемент попадает в рамку, только если включён исключительно внутри
+    //    группы. include * включил бы контейнеры раньше, и рамки остались бы
+    //    пустыми.
+    // 2. Группа заменяет собой границу системы, а не дополняет её. Поэтому
+    //    плоскости вложены во внешнюю группу: иначе граница платформы
+    //    исчезает, и виджет становится неотличим от внешнего сайта.
+    group 'Платформа товарных знаний' {
+      group 'Control Plane' {
+        include api, agent, ingestion
+      }
+      group 'Data Plane' {
+        include inference, graphdb, vectordb, opdb, blobs
+      }
+      include widget, workplace, observability
+    }
+
+    include buyer, manager, procurer, expert, aiEngineer, site, erp, priceFeed
+  }
+}
