@@ -21,6 +21,9 @@ specification {
   element gpu {
     style { color indigo }
   }
+  element component {
+    style { shape rectangle color sky }
+  }
 }
 
 model {
@@ -71,8 +74,60 @@ model {
       technology 'Python, FastAPI'
     }
     agent = container 'Сервис агента' {
-        description 'Конечный автомат обработки запроса: планирование, обход графа, самопроверка. Здесь же входные и выходные guardrails'
+      description 'Конечный автомат обработки запроса: планирование, обход графа, самопроверка. Здесь же входные и выходные guardrails'
       technology 'Python, LangGraph'
+
+      controller = component 'Контроллер запроса' {
+        description 'Точка входа. Принимает запрос с ролью и разрешёнными грифами, отдаёт ответ потоком'
+        technology 'FastAPI router'
+      }
+      guardIn = component 'Входные guardrails' {
+        description 'Инъекции инструкций и маскирование ПДн до передачи в модель'
+        technology 'Regex, NER, классификатор'
+      }
+      planner = component 'Планировщик' {
+        description 'Конечный автомат: выбирает инструменты, решает о дополнительном шаге, ограничивает число итераций'
+        technology 'LangGraph StateGraph'
+      }
+      vectorTool = component 'Инструмент векторного поиска' {
+        description 'Поиск чанков. Фильтр по ACL входит в запрос, а не применяется к результату'
+        technology 'Qdrant client'
+      }
+      graphTool = component 'Инструмент обхода графа' {
+        description 'Многошаговые запросы по графу. Предикат ACL добавляется к каждому Cypher'
+        technology 'Neo4j driver'
+      }
+      reranker = component 'Переранжировщик' {
+        description 'Переупорядочивает кандидатов из графа и вектора перед подачей в контекст'
+        technology 'Cross-encoder'
+      }
+      promptFactory = component 'Фабрика промптов' {
+        description 'Собирает промпт из шаблона под роль и сценарий, подставляет извлечённые факты'
+        technology 'Jinja2'
+      }
+      inferenceClient = component 'Клиент инференса' {
+        description 'Обращение к сервису инференса, потоковая выдача токенов, ограничение контекста'
+        technology 'OpenAI-совместимый клиент'
+      }
+      assembler = component 'Сборщик ответа' {
+        description 'Проставляет ссылки на источники. Если подтверждающих узлов нет, формирует отказ вместо догадки'
+        technology 'Python'
+      }
+      guardOut = component 'Выходные guardrails и аудит' {
+        description 'Проверка утечки закрытых атрибутов и ПДн, запись в журнал обращений, отправка трасс'
+        technology 'Python, OpenTelemetry'
+      }
+
+      controller -> guardIn 'Проверяет запрос'
+      controller -> planner 'Запускает обработку'
+      planner -> vectorTool 'Ищет чанки'
+      planner -> graphTool 'Обходит граф'
+      planner -> reranker 'Переранжирует кандидатов'
+      planner -> promptFactory 'Собирает промпт'
+      promptFactory -> inferenceClient 'Передаёт промпт'
+      inferenceClient -> assembler 'Отдаёт токены'
+      assembler -> guardOut 'Отдаёт ответ на проверку'
+      guardOut -> controller 'Возвращает проверенный ответ'
     }
     ingestion = gpu 'Конвейер загрузки' {
         description 'Офлайн: разбор документов, распознавание сканов, извлечение сущностей, присвоение грифа. Требует GPU'
@@ -107,13 +162,13 @@ model {
 
     widget -> api '1. Запрос пользователя' 'HTTPS / JSON'
     workplace -> api '1. Запрос пользователя' 'HTTPS / JSON'
-    api -> agent '2. Передаёт запрос и разрешённые грифы' 'gRPC'
+    api -> agent.controller '2. Передаёт запрос и разрешённые грифы' 'gRPC'
 
     // Права применяются как предикат запроса к хранилищу, а не постобработкой.
-    agent -> vectordb '3. Поиск чанков с фильтром по ACL' 'gRPC'
-    agent -> graphdb '4. Обход графа с предикатом ACL' 'Bolt'
-    agent -> inference '5. Генерация ответа по извлечённым фактам' 'OpenAI-совместимый API'
-    agent -> opdb '6. Пишет аудит обращения' 'SQL'
+    agent.vectorTool -> vectordb '3. Поиск чанков с фильтром по ACL' 'gRPC'
+    agent.graphTool -> graphdb '4. Обход графа с предикатом ACL' 'Bolt'
+    agent.inferenceClient -> inference '5. Генерация ответа по извлечённым фактам' 'OpenAI-совместимый API'
+    agent.guardOut -> opdb '6. Пишет аудит обращения' 'SQL'
 
     // Офлайн-конвейер: тяжёлая обработка вынесена из онлайн-пути.
     ingestion -> blobs 'Складывает оригиналы документов' 'S3 API'
@@ -140,6 +195,71 @@ model {
 }
 
 views {
+  view L3_Agent of agent {
+    title 'Уровень 3. Компоненты сервиса агента'
+    description 'Внутреннее устройство: guardrails, планировщик, инструменты извлечения, сборка ответа'
+    include *
+    include api, vectordb, graphdb, inference, opdb
+  }
+
+  // Динамические представления. Порядок шагов задаётся здесь и должен
+  // совпадать с составом компонентов уровня 3: каждый компонент участвует
+  // хотя бы в одном сценарии.
+  // Сценарий 1 разбит на две фазы. Причина не косметическая: 17 линий жизни
+  // в одной диаграмме нечитаемы, а граница между извлечением и генерацией
+  // совпадает с фазами автомата.
+  dynamic view Seq_Answer_1 {
+    title 'Сценарий 1а. Приём запроса и извлечение фактов'
+    description 'От вопроса покупателя до отранжированного набора фактов'
+
+    buyer -> platform.widget 'Спрашивает про совместимость модели'
+    platform.widget -> platform.api 'POST /v1/answer'
+    platform.api -> platform.agent.controller 'Запрос, роль buyer, грифы [public]'
+    platform.agent.controller -> platform.agent.guardIn 'Проверяет на инъекции и ПДн'
+    platform.agent.guardIn -> platform.agent.controller 'Очищенный текст'
+    platform.agent.controller -> platform.agent.planner 'Запускает автомат'
+    platform.agent.planner -> platform.agent.vectorTool 'Ищет чанки'
+    platform.agent.vectorTool -> platform.vectordb 'Поиск с фильтром acl=[public]'
+    platform.agent.planner -> platform.agent.graphTool 'Обходит граф от найденных артикулов'
+    platform.agent.graphTool -> platform.graphdb 'Cypher с предикатом acl'
+    platform.agent.planner -> platform.agent.reranker 'Переранжирует кандидатов'
+  }
+
+  dynamic view Seq_Answer_2 {
+    title 'Сценарий 1б. Генерация ответа и доставка'
+    description 'От собранных фактов до ответа со ссылками на источники'
+
+    platform.agent.planner -> platform.agent.promptFactory 'Собирает промпт из фактов'
+    platform.agent.promptFactory -> platform.agent.inferenceClient 'Передаёт промпт'
+    platform.agent.inferenceClient -> platform.inference 'Генерация, потоковая выдача'
+    platform.agent.inferenceClient -> platform.agent.assembler 'Токены ответа'
+    platform.agent.assembler -> platform.agent.guardOut 'Ответ со ссылками на артикулы'
+    platform.agent.guardOut -> platform.opdb 'Пишет аудит'
+    platform.agent.guardOut -> platform.agent.controller 'Проверенный ответ'
+    platform.agent.controller -> platform.api 'Поток SSE'
+    platform.api -> platform.widget 'Ответ со ссылками'
+    platform.widget -> buyer 'Показывает ответ и источники'
+  }
+
+  dynamic view Seq_Denied {
+    title 'Сценарий 2. Запрос данных вне уровня доступа'
+    description 'Менеджер спрашивает о маржинальности. Отказ формируется отсутствием данных, а не проверкой после ответа'
+
+    manager -> platform.workplace 'Какая маржа по этому бренду'
+    platform.workplace -> platform.api 'POST /v1/answer'
+    platform.api -> platform.agent.controller 'Запрос, роль manager, грифы [public, internal]'
+    platform.agent.controller -> platform.agent.planner 'Запускает автомат'
+    platform.agent.planner -> platform.agent.graphTool 'Обходит граф'
+    platform.agent.graphTool -> platform.graphdb 'Cypher с предикатом acl=[public, internal]'
+    platform.graphdb -> platform.agent.graphTool 'Ноль узлов: маржа имеет гриф confidential'
+    platform.agent.planner -> platform.agent.assembler 'Подтверждающих узлов нет'
+    platform.agent.assembler -> platform.agent.guardOut 'Отказ "нет данных" без упоминания причины'
+    platform.agent.guardOut -> platform.opdb 'Пишет аудит и число отсечённых узлов'
+    platform.agent.guardOut -> platform.agent.controller 'Отказ'
+    platform.agent.controller -> platform.api 'Ответ без источников'
+    platform.api -> platform.workplace 'Нет данных, предложить обратиться к закупщику'
+  }
+
   // index - стартовое представление LikeC4. Если его не задать,
   // инструмент создаст своё, и уровень 1 продублируется.
   view index {
