@@ -1,0 +1,401 @@
+openapi: 3.1.0
+
+info:
+  title: Внутренний API сервиса агента
+  version: 0.1.0
+  description: |
+    Интерфейс между API-шлюзом и сервисом агента. Внутренний контур, наружу не
+    публикуется: наружу смотрит только API-шлюз.
+
+    Ключевое соглашение о разграничении доступа. Шлюз аутентифицирует
+    пользователя, определяет его роль и разворачивает её в перечень разрешённых
+    грифов. Сервис агента роль не интерпретирует и правами не управляет: он
+    получает готовый перечень грифов и подставляет его в запросы к хранилищам.
+    Такое разделение делает права проверяемыми в отрыве от аутентификации.
+
+    Отказ по правам не отличается от отсутствия данных. Если запрошенные
+    сведения лежат под недоступным грифом, ответ приходит с кодом 200 и полем
+    `refusal`, а не с кодом 403. Иначе по коду ответа можно было бы установить
+    сам факт существования документа.
+
+servers:
+  - url: http://agent:8080
+    description: Внутренняя сеть, обращение только от API-шлюза
+
+tags:
+  - name: answer
+    description: Обработка товарных вопросов
+  - name: health
+    description: Проверки состояния
+
+paths:
+  /v1/answer:
+    post:
+      tags: [answer]
+      summary: Ответить на товарный вопрос
+      operationId: createAnswer
+      description: |
+        Запускает конечный автомат обработки: проверка входа, планирование,
+        извлечение фактов из графа и вектора, генерация, проверка выхода.
+
+        При `stream: false` ответ приходит целиком в JSON. При `stream: true`
+        отдаётся поток Server-Sent Events: сначала события `token`, затем одно
+        событие `done` с итоговым объектом. Промежуточные события источников не
+        содержат, поскольку атрибуция проверяется на последнем шаге.
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AnswerRequest'
+            examples:
+              buyer:
+                summary: Вопрос покупателя, открытые данные
+                value:
+                  question: Подойдёт ли витрина от Norev к модели 1:18 Mercedes W124
+                  session_id: 018f3a2b-7c1e-7a3d-9f42-6b0c5d8e1a77
+                  role: buyer
+                  acl: [public]
+                  stream: false
+              procurer:
+                summary: Вопрос закупщика, доступны закрытые данные
+                value:
+                  question: Как изменилась закупочная цена Minichamps с прошлого прайса
+                  session_id: 018f3a2b-7c1e-7a3d-9f42-6b0c5d8e1a78
+                  role: procurer
+                  acl: [public, internal, confidential]
+                  stream: false
+      responses:
+        '200':
+          description: |
+            Ответ сформирован. Обратите внимание: отказ по правам и отсутствие
+            данных также приходят с этим кодом, отличаются полем `refusal`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnswerResponse'
+              examples:
+                answered:
+                  summary: Ответ со ссылками на источники
+                  value:
+                    answer: |
+                      Витрина Norev 1:18 подходит по габаритам: внутренняя высота
+                      120 мм против 118 мм у модели. Артикул витрины 187001.
+                    citations:
+                      - type: product
+                        id: NOR187001
+                        title: Витрина Norev 1:18
+                      - type: document
+                        id: doc-catalog-norev-2026
+                        title: Каталог Norev 2026, с. 44
+                    refusal: null
+                    steps: 4
+                    denied_nodes: 0
+                    trace_id: 4bf92f3577b34da6a3ce929d0e0e4736
+                    usage:
+                      prompt_tokens: 1840
+                      completion_tokens: 96
+                      latency_ms: 1420
+                refused:
+                  summary: Данных нет либо они вне уровня доступа
+                  value:
+                    answer: null
+                    citations: []
+                    refusal:
+                      code: no_supporting_data
+                      message: Нет данных, подтверждающих ответ. Уточните у закупщика.
+                    steps: 2
+                    denied_nodes: 7
+                    trace_id: 9c1e0a55b2f34e17b4de5c2a1f0d8e93
+                    usage:
+                      prompt_tokens: 0
+                      completion_tokens: 0
+                      latency_ms: 210
+            text/event-stream:
+              schema:
+                type: string
+              examples:
+                stream:
+                  summary: Поток событий при stream true
+                  value: |
+                    event: token
+                    data: {"text":"Витрина "}
+
+                    event: token
+                    data: {"text":"Norev 1:18 "}
+
+                    event: done
+                    data: {"answer":"Витрина Norev 1:18 подходит...","citations":[{"type":"product","id":"NOR187001","title":"Витрина Norev 1:18"}],"refusal":null,"steps":4,"denied_nodes":0,"trace_id":"4bf92f35","usage":{"prompt_tokens":1840,"completion_tokens":96,"latency_ms":1420}}
+        '400':
+          description: Запрос не проходит проверку схемы
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                code: validation_error
+                message: Поле acl не может быть пустым
+                trace_id: 1a2b3c4d5e6f7788
+        '422':
+          description: |
+            Запрос отклонён входными фильтрами: попытка внедрения инструкций
+            либо содержимое, которое нельзя передавать в модель.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                code: guardrails_rejected
+                message: Запрос содержит попытку переопределить инструкции
+                trace_id: 7f8e9d0c1b2a3344
+        '429':
+          description: Превышен предел частоты запросов
+          headers:
+            Retry-After:
+              schema: { type: integer }
+              description: Через сколько секунд повторить
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                code: rate_limited
+                message: Слишком много запросов в этой сессии
+                trace_id: 2b3c4d5e6f778899
+        '503':
+          description: Сервис инференса или хранилище недоступны
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                code: upstream_unavailable
+                message: Сервис инференса не отвечает
+                trace_id: 3c4d5e6f77889900
+        '504':
+          description: |
+            Обработка не уложилась в отведённое время. Шлюз в этом случае
+            переходит на обычный поиск по каталогу, а не отдаёт ошибку
+            пользователю.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                code: timeout
+                message: Превышено время обработки запроса
+                trace_id: 4d5e6f7788990011
+
+  /healthz:
+    get:
+      tags: [health]
+      summary: Живость процесса
+      operationId: getHealth
+      responses:
+        '200':
+          description: Процесс отвечает
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status: { type: string, const: ok }
+
+  /readyz:
+    get:
+      tags: [health]
+      summary: Готовность принимать запросы
+      description: Проверяет доступность графа, вектора и сервиса инференса.
+      operationId: getReady
+      responses:
+        '200':
+          description: Все зависимости доступны
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Readiness'
+              example:
+                status: ready
+                dependencies:
+                  graph: ok
+                  vector: ok
+                  inference: ok
+        '503':
+          description: Часть зависимостей недоступна
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Readiness'
+              example:
+                status: degraded
+                dependencies:
+                  graph: ok
+                  vector: ok
+                  inference: unavailable
+
+components:
+  parameters:
+    RequestId:
+      name: X-Request-Id
+      in: header
+      required: false
+      description: Идентификатор запроса для сквозной трассировки.
+      schema:
+        type: string
+        maxLength: 64
+
+  schemas:
+    Classification:
+      type: string
+      description: |
+        Гриф конфиденциальности. Объект с неизвестным грифом считается
+        закрытым: неопределённость трактуется в пользу запрета.
+      enum: [public, internal, confidential]
+
+    Role:
+      type: string
+      enum: [buyer, manager, procurer, content, admin]
+
+    AnswerRequest:
+      type: object
+      required: [question, session_id, role, acl]
+      additionalProperties: false
+      properties:
+        question:
+          type: string
+          minLength: 3
+          maxLength: 2000
+          description: Вопрос пользователя в исходном виде, без предобработки.
+        session_id:
+          type: string
+          format: uuid
+          description: Идентификатор диалога. Нужен для истории и ограничения частоты.
+        role:
+          $ref: '#/components/schemas/Role'
+        acl:
+          type: array
+          minItems: 1
+          maxItems: 3
+          uniqueItems: true
+          items:
+            $ref: '#/components/schemas/Classification'
+          description: |
+            Разрешённые грифы, развёрнутые шлюзом из роли. Передаются явно, а не
+            выводятся сервисом: так права можно проверить отдельно от
+            аутентификации.
+        stream:
+          type: boolean
+          default: false
+        max_steps:
+          type: integer
+          minimum: 1
+          maximum: 6
+          default: 3
+          description: |
+            Предел шагов автомата. Ограничение обязательно: без него агент
+            способен зациклиться на вопросе, ответа на который в графе нет.
+
+    Citation:
+      type: object
+      required: [type, id, title]
+      properties:
+        type:
+          type: string
+          enum: [product, prototype, party, document]
+        id:
+          type: string
+          description: Артикул позиции либо идентификатор документа.
+        title:
+          type: string
+        page:
+          type: integer
+          minimum: 1
+          description: Страница, если источник постраничный.
+
+    Refusal:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          enum: [no_supporting_data, stale_stock_data, out_of_scope]
+        message:
+          type: string
+          description: |
+            Формулировка для пользователя. Не раскрывает ни причину отказа по
+            правам, ни факт существования закрытых документов.
+
+    Usage:
+      type: object
+      properties:
+        prompt_tokens: { type: integer, minimum: 0 }
+        completion_tokens: { type: integer, minimum: 0 }
+        latency_ms: { type: integer, minimum: 0 }
+
+    AnswerResponse:
+      type: object
+      required: [answer, citations, refusal, steps, denied_nodes, trace_id]
+      properties:
+        answer:
+          type: [string, 'null']
+          description: Текст ответа. Пусто, если заполнено поле refusal.
+        citations:
+          type: array
+          items:
+            $ref: '#/components/schemas/Citation'
+          description: |
+            Источники каждого фактического утверждения. Ответ без единого
+            источника пользователю не отдаётся: при пустом списке заполняется
+            refusal.
+        refusal:
+          oneOf:
+            - $ref: '#/components/schemas/Refusal'
+            - type: 'null'
+        steps:
+          type: integer
+          minimum: 0
+          description: Сколько шагов автомата фактически выполнено.
+        denied_nodes:
+          type: integer
+          minimum: 0
+          description: |
+            Сколько узлов отсечено фильтром по грифу. Пользователю не
+            показывается, пишется в журнал: помогает отличить отсутствие данных
+            от отсутствия прав при разборе обращений.
+        trace_id:
+          type: string
+        usage:
+          $ref: '#/components/schemas/Usage'
+
+    Readiness:
+      type: object
+      required: [status, dependencies]
+      properties:
+        status:
+          type: string
+          enum: [ready, degraded]
+        dependencies:
+          type: object
+          additionalProperties:
+            type: string
+            enum: [ok, unavailable]
+
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          enum:
+            - validation_error
+            - guardrails_rejected
+            - rate_limited
+            - upstream_unavailable
+            - timeout
+        message:
+          type: string
+        trace_id:
+          type: string
