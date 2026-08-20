@@ -18,6 +18,11 @@ info:
     `refusal`, а не с кодом 403. Иначе по коду ответа можно было бы установить
     сам факт существования документа.
 
+    По той же причине ответ не содержит числа отсечённых фильтром узлов. Даже
+    внутри контура эта величина сообщает, что данные существуют, но недоступны,
+    и обесценивает выбор кода 200. Для разбора обращений она пишется сервисом
+    агента прямо в журнал аудита и границу сервиса не пересекает.
+
 servers:
   - url: http://agent:8080
     description: Внутренняя сеть, обращение только от API-шлюза
@@ -92,7 +97,6 @@ paths:
                         title: Каталог Norev 2026, с. 44
                     refusal: null
                     steps: 4
-                    denied_nodes: 0
                     trace_id: 4bf92f3577b34da6a3ce929d0e0e4736
                     usage:
                       prompt_tokens: 1840
@@ -107,7 +111,6 @@ paths:
                       code: no_supporting_data
                       message: Нет данных, подтверждающих ответ. Уточните у закупщика.
                     steps: 2
-                    denied_nodes: 7
                     trace_id: 9c1e0a55b2f34e17b4de5c2a1f0d8e93
                     usage:
                       prompt_tokens: 0
@@ -127,7 +130,7 @@ paths:
                     data: {"text":"Norev 1:18 "}
 
                     event: done
-                    data: {"answer":"Витрина Norev 1:18 подходит...","citations":[{"type":"product","id":"NOR187001","title":"Витрина Norev 1:18"}],"refusal":null,"steps":4,"denied_nodes":0,"trace_id":"4bf92f35","usage":{"prompt_tokens":1840,"completion_tokens":96,"latency_ms":1420}}
+                    data: {"answer":"Витрина Norev 1:18 подходит...","citations":[{"type":"product","id":"NOR187001","title":"Витрина Norev 1:18"}],"refusal":null,"steps":4,"trace_id":"4bf92f35","usage":{"prompt_tokens":1840,"completion_tokens":96,"latency_ms":1420}}
         '400':
           description: Запрос не проходит проверку схемы
           content:
@@ -337,7 +340,7 @@ components:
 
     AnswerResponse:
       type: object
-      required: [answer, citations, refusal, steps, denied_nodes, trace_id]
+      required: [answer, citations, refusal, steps, trace_id]
       properties:
         answer:
           type: [string, 'null']
@@ -358,13 +361,6 @@ components:
           type: integer
           minimum: 0
           description: Сколько шагов автомата фактически выполнено.
-        denied_nodes:
-          type: integer
-          minimum: 0
-          description: |
-            Сколько узлов отсечено фильтром по грифу. Пользователю не
-            показывается, пишется в журнал: помогает отличить отсутствие данных
-            от отсутствия прав при разборе обращений.
         trace_id:
           type: string
         usage:
