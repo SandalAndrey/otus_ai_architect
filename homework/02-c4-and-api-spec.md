@@ -240,14 +240,13 @@ AnswerRequest:
 
 ```json
 {
-  "answer": "Витрина Norev 1:18 подходит по габаритам: внутренняя высота 120 мм против 118 мм у модели. Артикул витрины 187001.",
+  "answer": "Витрина Norev 1:18 подходит: высота 120 мм против 118 мм. Артикул 187001.",
   "citations": [
-    { "type": "product",  "id": "NOR187001",             "title": "Витрина Norev 1:18" },
-    { "type": "document", "id": "doc-catalog-norev-2026", "title": "Каталог Norev 2026, с. 44" }
+    { "type": "product", "id": "NOR187001", "title": "Витрина Norev 1:18" },
+    { "type": "document", "id": "doc-catalog-norev-2026", "title": "Каталог Norev, с. 44" }
   ],
   "refusal": null,
   "steps": 4,
-  "denied_nodes": 0,
   "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
   "usage": { "prompt_tokens": 1840, "completion_tokens": 96, "latency_ms": 1420 }
 }
@@ -264,13 +263,14 @@ AnswerRequest:
     "message": "Нет данных, подтверждающих ответ. Уточните у закупщика."
   },
   "steps": 2,
-  "denied_nodes": 7,
   "trace_id": "9c1e0a55b2f34e17b4de5c2a1f0d8e93"
 }
 ```
 
-Поле `denied_nodes` пользователю не показывается и пишется в журнал: оно
-позволяет при разборе обращений отличить отсутствие данных от отсутствия прав.
+Ответ намеренно не содержит числа отсечённых фильтром узлов. Такая величина
+сообщала бы, что данные существуют, но недоступны, и обесценивала бы выбор кода
+200. Для разбора обращений она пишется сервисом агента прямо в журнал аудита и
+границу сервиса не пересекает.
 
 ## Коды ответов
 
@@ -309,4 +309,5 @@ data: {"answer":"...","citations":[...],"refusal":null,"trace_id":"4bf92f35"}
 - [Модель C4](https://github.com/SandalAndrey/otus_ai_architect/blob/main/docs/diagrams/model.c4)
 - [Спецификация API](https://github.com/SandalAndrey/otus_ai_architect/blob/main/backend/openapi.yaml)
 - [Бизнес-функциональные требования](https://github.com/SandalAndrey/otus_ai_architect/blob/main/docs/01-business-functional-requirements.md)
+- [Трассировка: вопрос - риск - требование - работа - приёмка](https://github.com/SandalAndrey/otus_ai_architect/blob/main/docs/10-traceability.md)
 - [Реестр архитектурных решений](https://github.com/SandalAndrey/otus_ai_architect/tree/main/docs/adr)
