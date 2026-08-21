@@ -78,7 +78,7 @@ model {
       technology 'Python, LangGraph'
 
       controller = component 'Контроллер запроса' {
-        description 'Точка входа. Принимает запрос с ролью и разрешёнными грифами, отдаёт ответ потоком'
+        description 'Точка входа. Принимает запрос и перечень разрешённых грифов, роль не получает. Отдаёт ответ потоком'
         technology 'FastAPI router'
       }
       guardIn = component 'Входные guardrails' {
@@ -102,7 +102,7 @@ model {
         technology 'Cross-encoder'
       }
       promptFactory = component 'Фабрика промптов' {
-        description 'Собирает промпт из шаблона под роль и сценарий, подставляет извлечённые факты'
+        description 'Собирает промпт из шаблона под сценарий, подставляет извлечённые факты. Роль не учитывает: ответ определяется тем, что удалось извлечь'
         technology 'Jinja2'
       }
       inferenceClient = component 'Клиент инференса' {
@@ -218,7 +218,7 @@ views {
 
     buyer -> platform.widget 'Спрашивает про совместимость модели'
     platform.widget -> platform.api 'POST /v1/answer'
-    platform.api -> platform.agent.controller 'Запрос, роль buyer, грифы [public]'
+    platform.api -> platform.agent.controller 'Запрос, грифы [public]'
     platform.agent.controller -> platform.agent.guardIn 'Проверяет на инъекции и ПДн'
     platform.agent.guardIn -> platform.agent.controller 'Очищенный текст'
     platform.agent.controller -> platform.agent.planner 'Запускает автомат'
@@ -251,7 +251,7 @@ views {
 
     manager -> platform.workplace 'Какая маржа по этому бренду'
     platform.workplace -> platform.api 'POST /v1/answer'
-    platform.api -> platform.agent.controller 'Запрос, роль manager, грифы [public, internal]'
+    platform.api -> platform.agent.controller 'Запрос, грифы [public, internal]'
     platform.agent.controller -> platform.agent.planner 'Запускает автомат'
     platform.agent.planner -> platform.agent.graphTool 'Обходит граф'
     platform.agent.graphTool -> platform.graphdb 'Cypher с предикатом acl=[public, internal]'
