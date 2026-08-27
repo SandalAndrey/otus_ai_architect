@@ -24,6 +24,12 @@ specification {
   element component {
     style { shape rectangle color sky }
   }
+  // Агент отличается от компонента не оформлением ради красоты: у агента
+  // поведение зависит от вывода модели, у компонента нет. Разделение видно
+  // на диаграмме, потому что от него зависит проверяемость guardrails.
+  element llmAgent {
+    style { shape rectangle color amber }
+  }
 }
 
 model {
@@ -82,36 +88,36 @@ model {
         technology 'FastAPI router'
       }
       guardIn = component 'Входные guardrails' {
-        description 'Инъекции инструкций и маскирование ПДн до передачи в модель'
+        description 'Инъекции инструкций и маскирование ПДн до передачи в модель. Поведение не зависит от вывода модели, иначе проверку нельзя предъявить на приёмке'
         technology 'Regex, NER, классификатор'
       }
-      planner = component 'Планировщик' {
-        description 'Конечный автомат: выбирает инструменты, решает о дополнительном шаге, ограничивает число итераций'
-        technology 'LangGraph StateGraph'
+      supervisor = llmAgent 'Супервизор-маршрутизатор' {
+        description 'Относит вопрос к классу A или B, строит план извлечения, решает о доборе, держит предел max_steps. Он же конечный автомат графа'
+        technology 'LangGraph StateGraph, Plan-and-Execute'
       }
-      vectorTool = component 'Инструмент векторного поиска' {
-        description 'Поиск чанков. Фильтр по ACL входит в запрос, а не применяется к результату'
-        technology 'Qdrant client'
+      vectorAgent = llmAgent 'Агент векторного поиска' {
+        description 'Переформулирует вопрос, раскрывает алиасы и написания одной сущности. Фильтр по грифам входит в запрос, а не применяется к результату'
+        technology 'ReAct, Qdrant client'
       }
-      graphTool = component 'Инструмент обхода графа' {
-        description 'Многошаговые запросы по графу. Предикат ACL добавляется к каждому Cypher'
-        technology 'Neo4j driver'
+      graphAgent = llmAgent 'Агент обхода графа' {
+        description 'Формирует Cypher, выбирает глубину обхода по промежуточному результату. Предикат ACL добавляется к каждому запросу'
+        technology 'ReAct, Neo4j driver'
       }
       reranker = component 'Переранжировщик' {
-        description 'Переупорядочивает кандидатов из графа и вектора перед подачей в контекст'
-        technology 'Cross-encoder'
+        description 'Переупорядочивает объединённых кандидатов из графа и вектора. Cross-encoder без участия LLM'
+        technology 'bge-reranker-v2-m3'
       }
-      promptFactory = component 'Фабрика промптов' {
-        description 'Собирает промпт из шаблона под сценарий, подставляет извлечённые факты. Роль не учитывает: ответ определяется тем, что удалось извлечь'
-        technology 'Jinja2'
+      composer = llmAgent 'Агент-составитель ответа' {
+        description 'Собирает ответ из извлечённых фактов, проставляет ссылки на артикул и документ'
+        technology 'Chain-of-Thought'
+      }
+      verifier = llmAgent 'Агент-верификатор' {
+        description 'Сверяет каждое утверждение готового ответа с извлечёнными узлами. Отправляет на переделку либо заменяет отказом вместо догадки'
+        technology 'Chain-of-Thought'
       }
       inferenceClient = component 'Клиент инференса' {
-        description 'Обращение к сервису инференса, потоковая выдача токенов, ограничение контекста'
+        description 'Единственная точка обращения к сервису инференса. Принимает роль вызывающего агента, чтобы позже развести модели по ролям без правки агентов'
         technology 'OpenAI-совместимый клиент'
-      }
-      assembler = component 'Сборщик ответа' {
-        description 'Проставляет ссылки на источники. Если подтверждающих узлов нет, формирует отказ вместо догадки'
-        technology 'Python'
       }
       guardOut = component 'Выходные guardrails и аудит' {
         description 'Проверка утечки закрытых атрибутов и ПДн, запись в журнал обращений, отправка трасс'
@@ -119,15 +125,25 @@ model {
       }
 
       controller -> guardIn 'Проверяет запрос'
-      controller -> planner 'Запускает обработку'
-      planner -> vectorTool 'Ищет чанки'
-      planner -> graphTool 'Обходит граф'
-      planner -> reranker 'Переранжирует кандидатов'
-      planner -> promptFactory 'Собирает промпт'
-      promptFactory -> inferenceClient 'Передаёт промпт'
-      inferenceClient -> assembler 'Отдаёт токены'
-      assembler -> guardOut 'Отдаёт ответ на проверку'
+      controller -> supervisor 'Запускает обработку'
+      supervisor -> vectorAgent 'Поручает поиск чанков'
+      supervisor -> graphAgent 'Поручает обход графа'
+      vectorAgent -> reranker 'Отдаёт кандидатов'
+      graphAgent -> reranker 'Отдаёт кандидатов'
+      reranker -> supervisor 'Возвращает отранжированные факты'
+      supervisor -> composer 'Поручает сборку ответа'
+      composer -> verifier 'Отдаёт ответ на сверку с фактами'
+      verifier -> supervisor 'Ответ подтверждён либо отклонён'
+      supervisor -> guardOut 'Отдаёт ответ на проверку'
       guardOut -> controller 'Возвращает проверенный ответ'
+
+      // Все агенты обращаются к модели через один компонент. Иначе смена
+      // провайдера инференса означала бы правку каждого агента.
+      supervisor -> inferenceClient 'Планирование и классификация'
+      vectorAgent -> inferenceClient 'Переформулирование запроса'
+      graphAgent -> inferenceClient 'Построение Cypher'
+      composer -> inferenceClient 'Генерация ответа'
+      verifier -> inferenceClient 'Сверка утверждений'
     }
     ingestion = gpu 'Конвейер загрузки' {
         description 'Офлайн: разбор документов, распознавание сканов, извлечение сущностей, присвоение грифа. Требует GPU'
@@ -169,8 +185,8 @@ model {
 
     // Права применяются как предикат запроса к хранилищу, а не постобработкой.
     // Здесь gRPC уместен: это внутренний вызов Qdrant без потоковой отдачи.
-    agent.vectorTool -> vectordb '3. Поиск чанков с фильтром по ACL' 'gRPC'
-    agent.graphTool -> graphdb '4. Обход графа с предикатом ACL' 'Bolt'
+    agent.vectorAgent -> vectordb '3. Поиск чанков с фильтром по ACL' 'gRPC'
+    agent.graphAgent -> graphdb '4. Обход графа с предикатом ACL' 'Bolt'
     agent.inferenceClient -> inference '5. Генерация ответа по извлечённым фактам' 'OpenAI-совместимый API'
     agent.guardOut -> opdb '6. Пишет аудит обращения' 'SQL'
 
@@ -221,28 +237,55 @@ views {
     platform.api -> platform.agent.controller 'Запрос, грифы [public]'
     platform.agent.controller -> platform.agent.guardIn 'Проверяет на инъекции и ПДн'
     platform.agent.guardIn -> platform.agent.controller 'Очищенный текст'
-    platform.agent.controller -> platform.agent.planner 'Запускает автомат'
-    platform.agent.planner -> platform.agent.vectorTool 'Ищет чанки'
-    platform.agent.vectorTool -> platform.vectordb 'Поиск с фильтром acl=[public]'
-    platform.agent.planner -> platform.agent.graphTool 'Обходит граф от найденных артикулов'
-    platform.agent.graphTool -> platform.graphdb 'Cypher с предикатом acl'
-    platform.agent.planner -> platform.agent.reranker 'Переранжирует кандидатов'
+    platform.agent.controller -> platform.agent.supervisor 'Запускает автомат'
+    platform.agent.supervisor -> platform.agent.inferenceClient 'Классифицирует вопрос и строит план'
+    platform.agent.supervisor -> platform.agent.vectorAgent 'Поручает поиск, класс B'
+    platform.agent.vectorAgent -> platform.vectordb 'Поиск с фильтром acl=[public]'
+    platform.agent.supervisor -> platform.agent.graphAgent 'Поручает обход графа параллельно'
+    platform.agent.graphAgent -> platform.graphdb 'Cypher с предикатом acl'
+    platform.agent.vectorAgent -> platform.agent.reranker 'Кандидаты из вектора'
+    platform.agent.graphAgent -> platform.agent.reranker 'Кандидаты из графа'
+    platform.agent.reranker -> platform.agent.supervisor 'Отранжированные факты'
   }
 
   dynamic view Seq_Answer_2 {
     title 'Сценарий 1б. Генерация ответа и доставка'
     description 'От собранных фактов до ответа со ссылками на источники'
 
-    platform.agent.planner -> platform.agent.promptFactory 'Собирает промпт из фактов'
-    platform.agent.promptFactory -> platform.agent.inferenceClient 'Передаёт промпт'
-    platform.agent.inferenceClient -> platform.inference 'Генерация, потоковая выдача'
-    platform.agent.inferenceClient -> platform.agent.assembler 'Токены ответа'
-    platform.agent.assembler -> platform.agent.guardOut 'Ответ со ссылками на артикулы'
+    platform.agent.supervisor -> platform.agent.composer 'Поручает сборку ответа из фактов'
+    platform.agent.composer -> platform.agent.inferenceClient 'Генерация'
+    platform.agent.inferenceClient -> platform.inference 'Потоковая выдача токенов'
+    platform.agent.composer -> platform.agent.verifier 'Ответ со ссылками на сверку'
+    platform.agent.verifier -> platform.agent.inferenceClient 'Сверяет утверждения с узлами'
+    platform.agent.verifier -> platform.agent.supervisor 'Подтверждено'
+    platform.agent.supervisor -> platform.agent.guardOut 'Отдаёт ответ на проверку'
     platform.agent.guardOut -> platform.opdb 'Пишет аудит'
     platform.agent.guardOut -> platform.agent.controller 'Проверенный ответ'
     platform.agent.controller -> platform.api 'Поток SSE'
     platform.api -> platform.widget 'Ответ со ссылками'
     platform.widget -> buyer 'Показывает ответ и источники'
+  }
+
+  // Класс A показан отдельно намеренно: без него на схемах виден только полный
+  // путь, и адаптивная маршрутизация остаётся словами в ADR-0007.
+  dynamic view Seq_Answer_Simple {
+    title 'Сценарий 1в. Простой вопрос, короткий путь'
+    description 'Класс A: факт об одной позиции. Граф и верификатор не задействованы, вызовов модели два вместо пяти'
+
+    buyer -> platform.widget 'Какой масштаб у артикула NOR187001'
+    platform.widget -> platform.api 'POST /v1/answer'
+    platform.api -> platform.agent.controller 'Запрос, грифы [public]'
+    platform.agent.controller -> platform.agent.supervisor 'Запускает автомат'
+    platform.agent.supervisor -> platform.agent.inferenceClient 'Классификация: класс A, обход графа не нужен'
+    platform.agent.supervisor -> platform.agent.vectorAgent 'Поручает поиск по артикулу'
+    platform.agent.vectorAgent -> platform.vectordb 'Поиск с фильтром acl=[public]'
+    platform.agent.vectorAgent -> platform.agent.supervisor 'Единственный кандидат, переранжирование не требуется'
+    platform.agent.supervisor -> platform.agent.composer 'Поручает сборку ответа'
+    platform.agent.composer -> platform.agent.inferenceClient 'Генерация'
+    platform.agent.supervisor -> platform.agent.guardOut 'Отдаёт ответ на проверку'
+    platform.agent.guardOut -> platform.agent.controller 'Проверенный ответ'
+    platform.agent.controller -> platform.api 'Поток SSE'
+    platform.api -> platform.widget 'Ответ со ссылкой на артикул'
   }
 
   dynamic view Seq_Denied {
@@ -252,12 +295,13 @@ views {
     manager -> platform.workplace 'Какая маржа по этому бренду'
     platform.workplace -> platform.api 'POST /v1/answer'
     platform.api -> platform.agent.controller 'Запрос, грифы [public, internal]'
-    platform.agent.controller -> platform.agent.planner 'Запускает автомат'
-    platform.agent.planner -> platform.agent.graphTool 'Обходит граф'
-    platform.agent.graphTool -> platform.graphdb 'Cypher с предикатом acl=[public, internal]'
-    platform.graphdb -> platform.agent.graphTool 'Ноль узлов: маржа имеет гриф confidential'
-    platform.agent.planner -> platform.agent.assembler 'Подтверждающих узлов нет'
-    platform.agent.assembler -> platform.agent.guardOut 'Отказ "нет данных" без упоминания причины'
+    platform.agent.controller -> platform.agent.supervisor 'Запускает автомат'
+    platform.agent.supervisor -> platform.agent.graphAgent 'Поручает обход графа'
+    platform.agent.graphAgent -> platform.graphdb 'Cypher с предикатом acl=[public, internal]'
+    platform.graphdb -> platform.agent.graphAgent 'Ноль узлов: маржа имеет гриф confidential'
+    platform.agent.graphAgent -> platform.agent.supervisor 'Подтверждающих узлов нет'
+    platform.agent.supervisor -> platform.agent.composer 'Поручает отказ, до генерации не доводит'
+    platform.agent.composer -> platform.agent.guardOut 'Отказ "нет данных" без упоминания причины'
     platform.agent.guardOut -> platform.opdb 'Пишет аудит и число отсечённых узлов'
     platform.agent.guardOut -> platform.agent.controller 'Отказ'
     platform.agent.controller -> platform.api 'Ответ без источников'
