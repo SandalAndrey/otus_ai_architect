@@ -27,6 +27,18 @@ from retrieval import Hit, Index, build_embedder, build_reranker
 
 MAX_STEPS_LIMIT = 6      # потолок из спецификации API, backend/openapi.yaml
 
+# Режим экономии промпта. Замер на профиле A показал, что у составителя и
+# верификатора время уходит не на генерацию (17-25 выходных токенов), а на
+# обработку входа (700-800 входных): обработка входа идёт вчетверо быстрее
+# генерации, но токенов в ней в сорок раз больше. Плюс супервизор и векторный
+# агент тратят секунды на многословие полей, которые нужны только трассировке.
+#
+# PROMPT_DIET=on включает три меры разом, чтобы измерить их совокупный эффект:
+# короткое обоснование у супервизора, две переформулировки вместо трёх,
+# урезанный контекст составителя.
+DIET = os.getenv("PROMPT_DIET", "off").strip().lower() in ("on", "1", "true")
+FACTS_LIMIT = 4 if DIET else 8
+
 
 class State(TypedDict, total=False):
     question: str
@@ -72,7 +84,7 @@ def guard_out(state: State) -> dict:
 
 def rerank_node(state: State, index: Index) -> dict:
     """Переранжировщик. Cross-encoder без участия LLM."""
-    hits = index.rerank(state["question"], state.get("hits", []))
+    hits = index.rerank(state["question"], state.get("hits", []), top=FACTS_LIMIT)
     facts = [f"[{h.chunk.doc_id}#{h.chunk.id}] {h.chunk.text}" for h in hits]
     return {"hits": hits,
             "facts": facts + state.get("graph_facts", []),
@@ -91,7 +103,9 @@ def supervisor(state: State, llm) -> dict:
         "вопроса. Класс A - факт об одной позиции, достаточно поиска по тексту. "
         "Класс B - нужно сопоставить несколько позиций или пройти по связям "
         "(перепаки, отличия выпусков, аналоги). Верни "
-        '{"class":"A"|"B","need_graph":true|false,"reason":"..."}',
+        + ('{"class":"A"|"B","need_graph":true|false,"reason":"до 5 слов"}'
+           if DIET else
+           '{"class":"A"|"B","need_graph":true|false,"reason":"..."}'),
         state["question"],
         default={"class": "B", "need_graph": True, "reason": "разбор не удался"})
     klass = "B" if str(plan.get("class", "B")).upper() == "B" else "A"
@@ -107,11 +121,11 @@ def vector_agent(state: State, llm, index: Index) -> dict:
     это решение, а не параметр запроса, поэтому шаг агентский."""
     plan = llm.json(
         "vector",
-        "Перепиши вопрос в 1-3 поисковых запроса по каталогу. Раскрой алиасы "
+        f"Перепиши вопрос в 1-{2 if DIET else 3} поисковых запроса по каталогу. Раскрой алиасы "
         "и разные написания одной сущности (например ВАЗ-2101, Жигули, Lada 1200). "
         'Верни {"queries":["...","..."]}',
         state["question"], default={"queries": [state["question"]]})
-    queries = [q for q in plan.get("queries", []) if isinstance(q, str)][:3] \
+    queries = [q for q in plan.get("queries", []) if isinstance(q, str)][:2 if DIET else 3] \
         or [state["question"]]
 
     merged: dict[str, Hit] = {}
@@ -212,11 +226,16 @@ def verifier(state: State, llm) -> dict:
 
     unsupported = [u for u in verdict.get("unsupported", []) if isinstance(u, str) and u.strip()]
     if unsupported:
+        # Печатается сам текст утверждения, а не только счётчик: по числу
+        # нельзя понять, ошибся верификатор или ответ действительно
+        # неподтверждён, а ложные отказы - заведённый риск.
+        claims = "; ".join(u.strip()[:120] for u in unsupported[:3])
         return {"answer": None,
                 "refusal": {"code": "no_supporting_data",
                             "message": "Не удалось подтвердить ответ источниками."},
                 "steps": 1,
-                "trace": [f"verifier: не подтверждено {len(unsupported)} утверждений, отказ"]}
+                "trace": [f"verifier: не подтверждено {len(unsupported)}: {claims}"
+                          f" | пояснение: {str(verdict.get('note', ''))[:160]}"]}
     return {"steps": 1, "trace": ["verifier: утверждения подтверждены"]}
 
 
@@ -302,7 +321,8 @@ def main() -> None:
     index = Index(build_embedder(), build_reranker())
     app = build_app(llm, index)
     print(f"Модель: {os.getenv('LLM_PROVIDER', 'stub')}, "
-          f"эмбеддинги: {index.embedder.name}, реранкер: {index.reranker.name}\n")
+          f"эмбеддинги: {index.embedder.name}, реранкер: {index.reranker.name}, "
+          f"экономия промпта: {'включена' if DIET else 'выключена'}\n")
 
     cases = DEMO if args.demo or not args.question else \
         [(args.question, [a.strip() for a in args.acl.split(",") if a.strip()])]
@@ -319,6 +339,16 @@ def main() -> None:
     t = index.timing
     print(f"Суммарно по шагам извлечения: эмбеддинги {t.embed:.2f} с, "
           f"поиск {t.search:.2f} с, переранжирование {t.rerank:.2f} с")
+    print(f"Суммарно на вызовы модели: {llm.usage.seconds:.2f} с "
+          f"({llm.usage.calls} вызовов)\n")
+    print(llm.usage.report())
+
+    thinking = sum(st.thinking_calls for st in llm.usage.by_role.values())
+    if thinking:
+        print(f"\nВНИМАНИЕ: в {thinking} ответах модель рассуждала - переключатель "
+              f"/no_think не сработал. Замер латентности недействителен.")
+    elif llm.usage.calls:
+        print("\nРежим рассуждений не включался ни разу.")
 
 
 if __name__ == "__main__":
