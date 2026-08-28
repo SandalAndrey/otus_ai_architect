@@ -270,7 +270,7 @@ views {
   // путь, и адаптивная маршрутизация остаётся словами в ADR-0007.
   dynamic view Seq_Answer_Simple {
     title 'Сценарий 1в. Простой вопрос, короткий путь'
-    description 'Класс A: факт об одной позиции. Граф и верификатор не задействованы, вызовов модели два вместо пяти'
+    description 'Класс A: факт об одной позиции. Обход графа не выполняется, вызовов модели четыре вместо пяти'
 
     buyer -> platform.widget 'Какой масштаб у артикула NOR187001'
     platform.widget -> platform.api 'POST /v1/answer'
@@ -282,6 +282,11 @@ views {
     platform.agent.vectorAgent -> platform.agent.supervisor 'Единственный кандидат, переранжирование не требуется'
     platform.agent.supervisor -> platform.agent.composer 'Поручает сборку ответа'
     platform.agent.composer -> platform.agent.inferenceClient 'Генерация'
+    // Сверка выполняется и на коротком пути. Пропустить её нельзя: FR-2.4
+    // требует подтверждённой ссылки на источник для любого ответа, независимо
+    // от класса вопроса. Экономится обход графа, а не проверка достоверности.
+    platform.agent.composer -> platform.agent.verifier 'Ответ на сверку с фактами'
+    platform.agent.verifier -> platform.agent.supervisor 'Подтверждено'
     platform.agent.supervisor -> platform.agent.guardOut 'Отдаёт ответ на проверку'
     platform.agent.guardOut -> platform.agent.controller 'Проверенный ответ'
     platform.agent.controller -> platform.api 'Поток SSE'
