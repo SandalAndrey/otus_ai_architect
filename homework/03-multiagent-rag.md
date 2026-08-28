@@ -79,7 +79,13 @@ lang: ru
 
 # 2. Архитектура: схема взаимодействия агентов
 
-![Уровень 3. Агенты и детерминированные компоненты](../docs/diagrams/L3-agent.png)
+Диаграммы вставлены картинками, но нарисованы не вручную: они собираются из
+одной модели на LikeC4. Под каждым рисунком две ссылки - на представление в
+исходнике модели и на картинку в полном разрешении, где подписи читаются при
+увеличении. Ссылка ведёт на файл целиком, а представление ищется в нём по
+имени: привязка к номерам строк съезжала бы при любой правке модели.
+
+![Уровень 3. Агенты и детерминированные компоненты ([представление `L3_Agent` в модели](https://github.com/SandalAndrey/otus_ai_architect/blob/main/docs/diagrams/model.c4), [картинка в полном разрешении](https://github.com/SandalAndrey/otus_ai_architect/blob/main/docs/diagrams/L3-agent.png))](../docs/diagrams/L3-agent.png)
 
 Оранжевым показаны агенты, синим - детерминированные компоненты. Все агенты
 обращаются к модели через один компонент "Клиент инференса": смена провайдера
@@ -109,11 +115,11 @@ lang: ru
 Plan-and-Execute вместо сплошного ReAct: в ReAct следующий вызов начинается
 после оценки предыдущего, и два извлечения складываются во времени.
 
-![Сценарий класса B: приём запроса и извлечение фактов](../docs/diagrams/Seq-answer-1.png)
+![Сценарий класса B: приём запроса и извлечение фактов ([представление `Seq_Answer_1` в модели](https://github.com/SandalAndrey/otus_ai_architect/blob/main/docs/diagrams/model.c4), [картинка в полном разрешении](https://github.com/SandalAndrey/otus_ai_architect/blob/main/docs/diagrams/Seq-answer-1.png))](../docs/diagrams/Seq-answer-1.png)
 
-![Сценарий класса B: генерация ответа и сверка](../docs/diagrams/Seq-answer-2.png)
+![Сценарий класса B: генерация ответа и сверка ([представление `Seq_Answer_2` в модели](https://github.com/SandalAndrey/otus_ai_architect/blob/main/docs/diagrams/model.c4), [картинка в полном разрешении](https://github.com/SandalAndrey/otus_ai_architect/blob/main/docs/diagrams/Seq-answer-2.png))](../docs/diagrams/Seq-answer-2.png)
 
-![Сценарий класса A: короткий путь](../docs/diagrams/Seq-answer-simple.png)
+![Сценарий класса A: короткий путь ([представление `Seq_Answer_Simple` в модели](https://github.com/SandalAndrey/otus_ai_architect/blob/main/docs/diagrams/model.c4), [картинка в полном разрешении](https://github.com/SandalAndrey/otus_ai_architect/blob/main/docs/diagrams/Seq-answer-simple.png))](../docs/diagrams/Seq-answer-simple.png)
 
 ## Где используется RAG
 
