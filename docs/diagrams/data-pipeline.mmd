@@ -1,0 +1,89 @@
+%% Схема потока данных платформы товарных знаний.
+%% Обоснование выбора нотации - ADR-0013. Компонентная модель - model.c4.
+%% Пересборка: npx @mermaid-js/mermaid-cli -i data-pipeline.mmd -o data-pipeline.png -s 3 -b white
+flowchart TB
+
+  subgraph SRC["Источники: потоковых нет ни одного"]
+    direction LR
+    S1["D-01, D-02<br/>Каталог и фото<br/>микропакет, раз в час"]
+    S3["D-03, D-04<br/>Каталоги и прайсы<br/>пакет по событию"]
+    S10["D-10, D-11<br/>Обращения, агрегаты<br/>пакет, выгрузка"]
+    S9["D-09 Остатки и сроки<br/>чтение на лету, без ETL"]
+  end
+
+  subgraph BRZ["Bronze: как получено"]
+    direction LR
+    B1[("Оригиналы файлов<br/>байт в байт<br/>гриф Confidential")]
+    BQ{{"Файл читается,<br/>тип совпадает"}}
+  end
+
+  subgraph SLV["Silver: нормализовано"]
+    direction LR
+    T1["Распознавание,<br/>разбор таблиц"]
+    T2["Нормализация,<br/>алиасы FR-1.4"]
+    T3["ETL по грифу:<br/>цена, ПДн"]
+    T4["Гриф FR-1.6<br/>fail-closed"]
+    T5["Чанкинг<br/>по структуре"]
+    SQ{{"Блокирующее:<br/>acl заполнен"}}
+    SP[("Чанки<br/>Parquet")]
+  end
+
+  subgraph GLD["Gold: витрины"]
+    direction LR
+    E1["Эмбеддинги bge-m3<br/>GPU, отдельный шаг"]
+    G1["Узлы и связи графа"]
+    GQ{{"Блокирующее:<br/>векторов = чанков,<br/>полнота >= 0.98"}}
+    VDB[("Qdrant")]
+    GDB[("Neo4j")]
+    DS[("Датасет<br/>dev 60 / test 40<br/>DVC")]
+  end
+
+  subgraph ONL["Онлайн-путь"]
+    direction LR
+    Q["Запрос плюс<br/>разрешённые грифы"]
+    TR["Та же библиотека<br/>преобразований"]
+    CHK{{"Сверка embed_model<br/>и transform_version"}}
+    AG["Агенты извлечения<br/>и составления"]
+    ERP["Учётная система:<br/>остаток, без кэша"]
+    ANS["Ответ со ссылками<br/>на источники"]
+  end
+
+  BK["Карантин:<br/>разбор вручную"]
+
+  S1 --> B1
+  S3 --> B1
+  S10 --> B1
+  B1 --> BQ
+  BQ -- "прошло" --> T1
+  T1 --> T2 --> T3 --> T4 --> T5 --> SQ
+  SQ -- "прошло" --> SP
+  SP --> E1
+  SP --> G1
+  SP --> DS
+  E1 --> GQ
+  G1 --> GQ
+  GQ -- "смена псевдонима" --> VDB
+  GQ --> GDB
+
+  BQ -. "не прошло" .-> BK
+  SQ -. "не прошло" .-> BK
+  GQ -. "не прошло:<br/>индекс не переключается" .-> BK
+
+  Q --> TR --> CHK
+  CHK -- "совпало" --> AG
+  CHK -- "мажорное расхождение:<br/>отказ" --> ANS
+  VDB --> AG
+  GDB --> AG
+  S9 --> ERP
+  ERP --> AG
+  AG --> ANS
+  DS -. "измерение качества,<br/>в ответе не участвует" .-> AG
+
+  classDef step fill:#eef4fb,stroke:#5b7fa6
+  classDef gate fill:#fdf3e0,stroke:#b8863b
+  classDef store fill:#e8f2e8,stroke:#5f8a5f
+  classDef warn fill:#fbeeee,stroke:#a65b5b
+  class T1,T2,T3,T4,T5,E1,G1,TR,AG,Q,ERP,ANS step
+  class BQ,SQ,GQ,CHK gate
+  class B1,SP,VDB,GDB,DS store
+  class BK warn
