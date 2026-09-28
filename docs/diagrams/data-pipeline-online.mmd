@@ -1,0 +1,36 @@
+%% Схема 2 из 2: онлайн-путь, от запроса до ответа.
+%% Офлайн-конвейер - в data-pipeline-offline.mmd. Нотация обоснована в ADR-0013.
+%% Пересборка: npx @mermaid-js/mermaid-cli -i data-pipeline-online.mmd -o data-pipeline-online.png -s 3 -b white
+flowchart LR
+
+  Q["Запрос пользователя<br/>плюс разрешённые грифы"]
+  TR["Та же библиотека<br/>преобразований,<br/>что при индексации"]
+  CHK{{"Сверка версии<br/>активной коллекции:<br/>embed_model,<br/>transform_version"}}
+  AG["Агенты извлечения<br/>и составления ответа"]
+  ANS["Ответ со ссылками<br/>на источники"]
+
+  subgraph GLD["Витрины, построены офлайн-конвейером"]
+    direction TB
+    VDB[("Qdrant<br/>чанки, фильтр по грифу")]
+    GDB[("Neo4j<br/>Product, Prototype,<br/>Party, Document")]
+  end
+
+  ERP["Учётная система:<br/>остаток и срок,<br/>без кэша"]
+  DS[("Золотой датасет<br/>оценочный контур")]
+
+  Q --> TR --> CHK
+  VDB -. "версия коллекции,<br/>до поиска" .-> CHK
+  CHK -- "мажорное расхождение:<br/>отказ" --> ANS
+  CHK -- "совпало" --> AG
+  VDB -- "поиск чанков<br/>с предикатом ACL" --> AG
+  GDB -- "обход графа<br/>с предикатом ACL" --> AG
+  ERP -- "чтение на лету" --> AG
+  AG --> ANS
+  DS -. "измерение качества,<br/>в ответе не участвует" .-> AG
+
+  classDef step fill:#eef4fb,stroke:#5b7fa6
+  classDef gate fill:#fdf3e0,stroke:#b8863b
+  classDef store fill:#e8f2e8,stroke:#5f8a5f
+  class Q,TR,AG,ANS,ERP step
+  class CHK gate
+  class VDB,GDB,DS store

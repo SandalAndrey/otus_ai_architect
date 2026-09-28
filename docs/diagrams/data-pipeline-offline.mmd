@@ -1,0 +1,75 @@
+%% Схема 1 из 2: офлайн-конвейер, от источника до витрин.
+%% Онлайн-путь - в data-pipeline-online.mmd. Нотация обоснована в ADR-0013.
+%% Пересборка: npx @mermaid-js/mermaid-cli -i data-pipeline-offline.mmd -o data-pipeline-offline.png -s 3 -b white
+flowchart TB
+
+  subgraph SRC["Источники: потоковых нет ни одного"]
+    direction LR
+    S1["D-01, D-02<br/>Каталог и фото<br/>микропакет, раз в час"]
+    S3["D-03, D-04<br/>Каталоги и прайсы<br/>пакет по событию"]
+    S10["D-10 Обращения<br/>не корпус знаний"]
+    S11["D-11 Агрегаты нагрузки<br/>в озеро не попадает"]
+  end
+
+  subgraph BRZ["Bronze: как получено"]
+    direction LR
+    B1[("Оригиналы файлов<br/>байт в байт<br/>гриф Confidential")]
+    BQ{{"Файл читается,<br/>тип совпадает"}}
+  end
+
+  subgraph SLV["Silver: нормализовано"]
+    direction LR
+    T1["Очистка: распознавание,<br/>разбор таблиц, нормализация,<br/>алиасы FR-1.4"]
+    T3["ETL по грифу: подмена цены,<br/>маскирование ПДн,<br/>гриф FR-1.6 fail-closed"]
+    T5["Чанкинг по структуре,<br/>границы не пересекают гриф"]
+    SQ{{"Блокирующее: acl заполнен,<br/>source_type не из D-10 и D-11,<br/>uncertain не выше 10 процентов"}}
+    SP[("Чанки<br/>Parquet")]
+  end
+
+  subgraph GLD["Gold: витрины онлайн-пути"]
+    direction LR
+    E1["Эмбеддинги bge-m3<br/>GPU, отдельный шаг"]
+    G1["Узлы и связи графа"]
+    GQ{{"Блокирующее:<br/>векторов = чанков,<br/>полнота >= 0.98"}}
+    VDB[("Qdrant")]
+    GDB[("Neo4j")]
+  end
+
+  subgraph EVA["Оценочный контур: с корпусом не смешивается"]
+    direction LR
+    AN["Обезличивание<br/>в контуре Заказчика"]
+    EX["Сборка пар с экспертом,<br/>работа 1.3"]
+    DS[("Золотой датасет<br/>dev 60 / test 40, DVC<br/>expected_doc_ids")]
+  end
+
+  SIZ["Расчёт ресурсов и TCO<br/>документ, не хранилище"]
+  BK["Карантин:<br/>разбор вручную"]
+
+  S1 --> B1
+  S3 --> B1
+  B1 --> BQ
+  BQ -- "прошло" --> T1
+  T1 --> T3 --> T5 --> SQ
+  SQ -- "прошло" --> SP
+  SP --> E1
+  SP --> G1
+  E1 --> GQ
+  G1 --> GQ
+  GQ -- "смена псевдонима" --> VDB
+  GQ --> GDB
+
+  BQ -. "не прошло" .-> BK
+  SQ -. "не прошло" .-> BK
+  GQ -. "не прошло:<br/>индекс не переключается" .-> BK
+
+  S10 --> AN --> EX --> DS
+  S11 --> SIZ
+
+  classDef step fill:#eef4fb,stroke:#5b7fa6
+  classDef gate fill:#fdf3e0,stroke:#b8863b
+  classDef store fill:#e8f2e8,stroke:#5f8a5f
+  classDef warn fill:#fbeeee,stroke:#a65b5b
+  class T1,T3,T5,E1,G1,AN,EX,SIZ step
+  class BQ,SQ,GQ gate
+  class B1,SP,VDB,GDB,DS store
+  class BK warn
