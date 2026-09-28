@@ -9,23 +9,23 @@
 требованием Заказчика, от переделки из-за ошибки проектирования. Без зафиксированного
 контекста решения доказать это невозможно.
 
-| Номер                                                   | Решение                                               | Статус     |
-| ------------------------------------------------------- | ----------------------------------------------------- | ---------- |
-| [0001](0001-use-adr.md)                                 | Вести реестр архитектурных решений                    | Принято    |
-| [0002](0002-access-control-before-retrieval.md)         | Применять разграничение доступа до извлечения         | Принято    |
-| [0003](0003-likec4-for-c4-model.md)                     | Вести модель C4 в LikeC4                              | Принято    |
-| [0004](0004-graphrag-over-vector-only-rag.md)           | Извлекать факты обходом графа знаний                  | Принято    |
-| [0005](0005-langgraph-state-machine-agent.md)           | Строить агента как конечный автомат на LangGraph      | Принято    |
-| [0006](0006-neo4j-and-qdrant-as-stores.md)              | Взять Neo4j и Qdrant как хранилища                    | Предложено |
-| [0007](0007-multiagent-online-path.md)                  | Разделить онлайн-путь на супервизора и агентов        | Принято    |
-| [0008](0008-embedding-and-reranking-models.md)          | Взять bge-m3 и bge-reranker-v2-m3                     | Принято    |
-| [0009](0009-llm-hosting-self-hosted-on-rented-gpu.md)   | Разместить модель в своём контуре на арендованном GPU | Принято    |
-| [0010](0010-resilience-timeouts-retries-degradation.md) | Задать таймауты, повторы и уровни деградации          | Принято    |
-| [0011](0011-data-layer-lake-orchestrator-quality.md)    | Слой данных: озеро, Dagster, Great Expectations       | Принято    |
-| [0012](0012-no-feature-store-indexing-serving-consistency.md) | Не заводить хранилище признаков                  | Принято    |
-| [0013](0013-mermaid-for-data-flow.md)                   | Рисовать поток данных в Mermaid                       | Принято    |
-| [0014](0014-quality-gate-and-judge-strategy.md)         | Разделить блокирующий гейт и judge-метрики            | Принято    |
-| [0015](0015-guardrails-cascade-and-placement.md)        | Guardrails каскадом, блокировка в публичном контуре   | Принято    |
+| Номер                                                         | Решение                                               | Статус     |
+| ------------------------------------------------------------- | ----------------------------------------------------- | ---------- |
+| [0001](0001-use-adr.md)                                       | Вести реестр архитектурных решений                    | Принято    |
+| [0002](0002-access-control-before-retrieval.md)               | Применять разграничение доступа до извлечения         | Принято    |
+| [0003](0003-likec4-for-c4-model.md)                           | Вести модель C4 в LikeC4                              | Принято    |
+| [0004](0004-graphrag-over-vector-only-rag.md)                 | Извлекать факты обходом графа знаний                  | Принято    |
+| [0005](0005-langgraph-state-machine-agent.md)                 | Строить агента как конечный автомат на LangGraph      | Принято    |
+| [0006](0006-neo4j-and-qdrant-as-stores.md)                    | Взять Neo4j и Qdrant как хранилища                    | Предложено |
+| [0007](0007-multiagent-online-path.md)                        | Разделить онлайн-путь на супервизора и агентов        | Принято    |
+| [0008](0008-embedding-and-reranking-models.md)                | Взять bge-m3 и bge-reranker-v2-m3                     | Принято    |
+| [0009](0009-llm-hosting-self-hosted-on-rented-gpu.md)         | Разместить модель в своём контуре на арендованном GPU | Принято    |
+| [0010](0010-resilience-timeouts-retries-degradation.md)       | Задать таймауты, повторы и уровни деградации          | Принято    |
+| [0011](0011-data-layer-lake-orchestrator-quality.md)          | Слой данных: озеро, Dagster, Great Expectations       | Принято    |
+| [0012](0012-no-feature-store-indexing-serving-consistency.md) | Не заводить хранилище признаков                       | Принято    |
+| [0013](0013-mermaid-for-data-flow.md)                         | Рисовать поток данных в Mermaid                       | Принято    |
+| [0014](0014-quality-gate-and-judge-strategy.md)               | Разделить блокирующий гейт и judge-метрики            | Принято    |
+| [0015](0015-guardrails-cascade-and-placement.md)              | Guardrails каскадом, блокировка в публичном контуре   | Принято    |
 
 Статус "Предложено" у записи 0006 не оплошность. Выбор хранилищ упирается в
 вопрос Q-16 о требованиях импортозамещения, который Заказчику ещё не задан, а
