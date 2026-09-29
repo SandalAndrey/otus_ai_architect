@@ -1,0 +1,62 @@
+%% Слой безопасности онлайн-пути: что проверяется до модели и после неё.
+%% Состав каскада обоснован в ADR-0015, ACL до извлечения - в ADR-0002.
+%% Пересборка: npx @mermaid-js/mermaid-cli -i security-layer.mmd -o security-layer.png -s 3 -b white
+flowchart TB
+
+  U["Запрос плюс разрешённые грифы<br/>роль разбирает шлюз, не ядро"]
+
+  subgraph GIN["guardIn: вход, бюджет 300 мс"]
+    direction LR
+    L1["Уровень 1: правила и словари<br/>менее 5 мс<br/>известные инъекции, PII по формату"]
+    PII["PII Sanitizer<br/>Presidio: маскирование до промпта"]
+    L2["Уровень 2: близость к кластерам атак<br/>20-50 мс<br/>перефразированные инъекции, уход от темы"]
+  end
+
+  ACL["Извлечение: фильтр по грифу<br/>предикатом запроса, ADR-0002"]
+  ST[("Qdrant и Neo4j")]
+
+  LLM["Ядро: агенты и модель<br/>видят только разрешённое,<br/>без ПДн и секретов"]
+
+  subgraph GOUT["guardOut: выход, бюджет 300 мс"]
+    direction LR
+    O1["Утечка атрибутов закрытого грифа<br/>NFR-3.1"]
+    O2["Ссылка на источник обязательна<br/>NFR-2.4"]
+    O3["Адреса ссылок и изображений<br/>только свои домены, риск R-12"]
+    O4["Токсичность, NFR-3.4"]
+  end
+
+  AUD[("Аудит обращения<br/>12 месяцев, NFR-3.5")]
+  ANS["Ответ пользователю"]
+  DENY["Отказ:<br/>fail-closed без исключений"]
+  PA["Постаудит: модель-страж<br/>вне бюджета запроса"]
+
+  U --> L1
+  L1 -- "прошло" --> PII --> L2
+  L1 -. "сработало" .-> DENY
+  L2 -- "прошло" --> ACL
+  L2 -. "сработало" .-> DENY
+  ACL --> ST --> LLM
+  LLM --> O1
+  LLM --> O2
+  LLM --> O3
+  LLM --> O4
+  O1 -. "нарушение" .-> DENY
+  O3 -. "внешний адрес" .-> DENY
+  O2 -. "нет ссылки" .-> DENY
+  O1 --> AUD
+  O2 --> AUD
+  O3 --> AUD
+  O4 --> AUD
+  AUD --> ANS
+  L2 -. "подозрительно,<br/>но пропущено" .-> PA
+  O4 -. "то же" .-> PA
+  PA -. "новое правило" .-> L1
+
+  classDef step fill:#eef4fb,stroke:#5b7fa6
+  classDef sec fill:#fdf3e0,stroke:#b8863b
+  classDef store fill:#e8f2e8,stroke:#5f8a5f
+  classDef warn fill:#fbeeee,stroke:#a65b5b
+  class U,LLM,ANS,PA step
+  class L1,L2,PII,ACL,O1,O2,O3,O4 sec
+  class ST,AUD store
+  class DENY warn
