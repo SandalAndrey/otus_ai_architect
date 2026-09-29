@@ -146,7 +146,7 @@ model {
       verifier -> inferenceClient 'Сверка утверждений'
     }
     ingestion = gpu 'Конвейер загрузки' {
-        description 'Офлайн: разбор документов, распознавание сканов, извлечение сущностей, присвоение грифа. Требует GPU'
+        description 'Офлайн: разбор документов, распознавание сканов, извлечение сущностей, присвоение грифа, проверка на инъекции при индексации (ingestionGuard). Требует GPU'
       technology 'Python'
     }
 
@@ -172,8 +172,8 @@ model {
     }
 
     observability = container 'Контур наблюдаемости' {
-      description 'Трассы обработки запроса, метрики качества и потребления'
-      technology 'OpenTelemetry, Prometheus, Grafana'
+      description 'Трассы обработки запроса, метрики качества и потребления. Метрики в Prometheus, трассы в Tempo поверх объектного хранилища'
+      technology 'OpenTelemetry, Prometheus, Tempo, Grafana'
     }
 
     widget -> api '1. Запрос пользователя' 'HTTPS / JSON'
