@@ -5,7 +5,9 @@
 
 Расчёты с формулами вынесены в таблицу
 [`homework/assets/07-sizing-calculations.xlsx`](../homework/assets/07-sizing-calculations.xlsx):
-там они пересчитываются при смене цены, объёма или требований.
+там они пересчитываются при смене цены, объёма или требований. Та же таблица
+доступна [в Google Таблицах](https://docs.google.com/spreadsheets/d/1987q7pAgemdSmfY-jmDKZJoK--UljhKkI8FKR9OuOE4/edit?usp=sharing)
+для просмотра без выгрузки файла.
 
 ## 1. Расчёт видеопамяти
 

@@ -10,7 +10,9 @@ lang: ru
 Репозиторий проекта: <https://github.com/SandalAndrey/otus_ai_architect>
 
 **Таблица с расчётами:**
-[`homework/assets/07-sizing-calculations.xlsx`](https://github.com/SandalAndrey/otus_ai_architect/blob/main/homework/assets/07-sizing-calculations.xlsx) -
+[Google Таблица](https://docs.google.com/spreadsheets/d/1987q7pAgemdSmfY-jmDKZJoK--UljhKkI8FKR9OuOE4/edit?usp=sharing)
+(тот же файл в репозитории:
+[`homework/assets/07-sizing-calculations.xlsx`](https://github.com/SandalAndrey/otus_ai_architect/blob/main/homework/assets/07-sizing-calculations.xlsx)) -
 пять листов с живыми формулами: исходные данные, видеопамять, подбор карт,
 стоимость облаков, эффект оптимизаций. Меняется цена или нагрузка -
 пересчитывается всё остальное.
