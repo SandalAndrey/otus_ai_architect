@@ -1,0 +1,42 @@
+%% Конвейер поставки кода. Решения - ADR-0020, описание - docs/16-delivery-pipeline.md.
+%% Ромбы - автоматические гейты. Жёлтым выделены два единственных ручных действия.
+%% Пересборка: npx @mermaid-js/mermaid-cli -i delivery-cicd.mmd -o delivery-cicd.png -s 3 -b white
+flowchart LR
+
+  DEV["Коммит<br/>в ветку"]
+  CI["Линтер и типы,<br/>модульные тесты,<br/>проверка символов"]
+  IMG["Сборка образа,<br/>тег - хеш коммита,<br/>сканирование зависимостей"]
+  REG[("Реестр образов<br/>внутри контура")]
+  STG["Стенд:<br/>та же сборка,<br/>уменьшенный корпус"]
+
+  FG{"Быстрый гейт, минуты:<br/>15 канареек, формат ответа,<br/>фильтр по грифу,<br/>наличие источника"}
+  E2E["Сквозные тесты:<br/>четыре роли,<br/>проверка отказа<br/>по правам"]
+  APP1["Слияние в main:<br/>решение ревьюера"]
+  SLOW{"Полный гейт, часы:<br/>Ragas на золотом датасете,<br/>сравнение с прошлым<br/>выпуском"}
+
+  BUNDLE[("Реестр выпуска:<br/>образ + версия весов +<br/>версия индекса +<br/>версия промптов")]
+  APP2["Старт выпуска:<br/>решение дежурного"]
+  CAN["Канареечный выпуск:<br/>схема delivery-canary"]
+
+  STOP["Выпуск остановлен,<br/>отчёт в запрос на слияние"]
+
+  DEV --> CI --> IMG --> REG --> STG --> FG
+  FG -- "ноль нарушений" --> E2E --> APP1 --> SLOW
+  SLOW -- "порог взят,<br/>просадка менее 0.03" --> BUNDLE --> APP2 --> CAN
+
+  CI -. "падение" .-> STOP
+  IMG -. "уязвимость<br/>высокого уровня" .-> STOP
+  FG -. "любое нарушение" .-> STOP
+  E2E -. "падение" .-> STOP
+  SLOW -. "порог не взят<br/>либо просадка" .-> STOP
+
+  classDef step fill:#eef4fb,stroke:#5b7fa6
+  classDef gate fill:#fdf3e0,stroke:#b8863b
+  classDef store fill:#e8f2e8,stroke:#5f8a5f
+  classDef manual fill:#f6f0d8,stroke:#9a8a3b,stroke-width:2px
+  classDef warn fill:#fbeeee,stroke:#a65b5b
+  class DEV,CI,IMG,STG,E2E,CAN step
+  class FG,SLOW gate
+  class REG,BUNDLE store
+  class APP1,APP2 manual
+  class STOP warn

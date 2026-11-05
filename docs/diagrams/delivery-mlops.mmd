@@ -1,0 +1,46 @@
+%% Конвейер обновления знаний и его стык с поставкой кода.
+%% Обучения модели в проекте нет: место Retrain занимает переиндексация.
+%% Решения - ADR-0020 и ADR-0012, описание - docs/16-delivery-pipeline.md.
+%% Пересборка: npx @mermaid-js/mermaid-cli -i delivery-mlops.mmd -o delivery-mlops.png -s 3 -b white
+flowchart LR
+
+  SRC["Новая партия:<br/>прайс поставщика, выгрузка каталога,<br/>PDF-каталог, сканы"]
+  TRG["Триггер Dagster:<br/>появление объекта в bronze<br/>либо расписание"]
+  BR[("Bronze: оригиналы<br/>байт в байт")]
+  SL[("Silver: нормализованные<br/>сущности и чанки")]
+  GE1{"Great Expectations на границе зон:<br/>гриф заполнен, ПДн замаскированы,<br/>закупочная цена подменена"}
+  IDX["Сборка новой коллекции<br/>рядом с действующей"]
+  GE2{"Проверки готовности индекса:<br/>полнота не ниже 0.98,<br/>векторов = чанков"}
+  VER[("Реестр версий индекса:<br/>мажор, минор, ingest_run_id")]
+  FG2{"Быстрый гейт<br/>на новой коллекции"}
+
+  WGT["Смена закреплённой версии:<br/>веса LLM, эмбеддер,<br/>переранжировщик"]
+  WREG[("Хранилище весов:<br/>версия, хеш, лицензия")]
+
+  BUNDLE[("Реестр выпуска:<br/>образ + веса + индекс + промпты.<br/>Единица выпуска - четвёрка, не файл")]
+
+  SW["Смена псевдонима коллекции:<br/>переключение атомарное"]
+  ONLINE["Онлайн-путь сверяет версию<br/>до поиска, ADR-0012"]
+  ROLL["Откат: обратная смена<br/>псевдонима, секунды"]
+  QUAR["Карантин партии:<br/>разбор оператором"]
+
+  SRC --> TRG --> BR --> SL
+  SL --> GE1
+  GE1 -. "партия не прошла" .-> QUAR
+  GE1 -- "прошло" --> IDX --> GE2
+  GE2 -. "ниже порога" .-> QUAR
+  GE2 -- "прошло" --> VER --> FG2
+  FG2 -. "канарейка сработала" .-> QUAR
+  FG2 -- "ноль нарушений" --> BUNDLE
+  WGT --> WREG --> BUNDLE
+  BUNDLE --> SW --> ONLINE
+  SW -. "сигнал отката" .-> ROLL
+
+  classDef step fill:#eef4fb,stroke:#5b7fa6
+  classDef gate fill:#fdf3e0,stroke:#b8863b
+  classDef store fill:#e8f2e8,stroke:#5f8a5f
+  classDef warn fill:#fbeeee,stroke:#a65b5b
+  class SRC,TRG,IDX,WGT,SW,ONLINE step
+  class GE1,GE2,FG2 gate
+  class BR,SL,VER,WREG,BUNDLE store
+  class QUAR,ROLL warn
