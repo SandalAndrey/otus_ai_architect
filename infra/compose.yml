@@ -1,0 +1,109 @@
+# Стек на одном узле. Описание и обоснование - docs/16-delivery-pipeline.md.
+#
+# СКЕЛЕТ. Образ приложения пока не собирается (см. Dockerfile), значения в
+# environment опущены, томов с данными нет. Файл фиксирует состав сервисов и
+# сегментацию сетей; разворачивается начиная с работы 3.1 плана работ.
+#
+# Профиль B (арендованный GPU, NFR-1) подключается отдельным override-файлом
+# на время нагрузочного тестирования: docker compose -f compose.yml -f compose.gpu.yml
+
+name: assistant
+
+services:
+
+  # --- Публичный периметр ------------------------------------------------
+
+  proxy:
+    image: traefik:v3.1
+    networks: [edge, internal]
+    ports: ["443:443"]
+    # Здесь же задаётся вес канареечной ступени и закрепление сессии по хешу
+    # идентификатора диалога. Закрепление обязательно: диалог хранит до 60
+    # обменов контекста (NFR-1.6), и перескок между версиями на середине
+    # выглядит как дефект продукта.
+
+  # --- Приложение ---------------------------------------------------------
+
+  app:
+    image: registry.internal/assistant:${RELEASE_SHA:-dev}
+    # Тег - хеш коммита, не latest: иначе перезапуск контейнера меняет версию
+    # без следа в истории.
+    networks: [internal]
+    depends_on: [vllm, neo4j, qdrant]
+    environment:
+      RELEASE: ${RELEASE:-dev}
+      # Значение попадает меткой release на все метрики. Без неё канарейку
+      # нельзя отличить от базы ни на одной ступени выпуска.
+
+  vllm:
+    image: vllm/vllm-openai:v0.6.3
+    networks: [internal]
+    volumes: ["weights:/weights:ro"]
+    # Непрерывная пакетная обработка - обязательное требование, а не
+    # оптимизация: без неё одна карта даёт 108 ток/с суммарно вместо
+    # 108 на поток, и потребовалось бы 17 карт (ADR-0019).
+
+  # --- Хранилища ----------------------------------------------------------
+
+  neo4j:
+    image: neo4j:5-community
+    networks: [internal]
+    volumes: ["neo4j:/data"]
+
+  qdrant:
+    image: qdrant/qdrant:v1.12.1
+    networks: [internal]
+    volumes: ["qdrant:/qdrant/storage"]
+    # Переключение версии индекса - смена псевдонима коллекции, откат -
+    # обратная смена (ADR-0012). Смеси векторов двух версий не возникает.
+
+  minio:
+    image: minio/minio:RELEASE.2024-10-13T13-34-11Z
+    networks: [internal]
+    volumes: ["lake:/data"]
+    # Зоны озера bronze/silver/gold (ADR-0011) плюс бакет трасс для Tempo.
+
+  # --- Конвейер данных ----------------------------------------------------
+
+  dagster:
+    image: dagster/dagster-k8s:1.8.12
+    networks: [internal]
+    # Граф активов, а не последовательность задач: происхождение данных
+    # получается побочным продуктом объявления зависимостей.
+
+  # --- Наблюдаемость ------------------------------------------------------
+
+  otel:
+    image: otel/opentelemetry-collector-contrib:0.111.0
+    networks: [internal]
+
+  prometheus:
+    image: prom/prometheus:v2.55.0
+    networks: [internal]
+    volumes: ["prom:/prometheus"]
+
+  tempo:
+    image: grafana/tempo:2.6.0
+    networks: [internal]
+    # Трассы поверх того же MinIO, что и озеро: отдельное хранилище не заводим.
+
+  grafana:
+    image: grafana/grafana:11.3.0
+    networks: [edge, internal]
+
+networks:
+  edge:
+    # Единственная сеть с выходом наружу. В ней только прокси и Grafana.
+  internal:
+    internal: true
+    # Выхода в интернет нет. Закрытый контур (NFR-3) держится на маршрутизации,
+    # а не на том, что в коде нет обращений к внешним API.
+
+volumes:
+  neo4j:
+  qdrant:
+  lake:
+  prom:
+  weights:
+    # Веса монтируются, а не кладутся в образ: версионируются отдельно,
+    # запись реестра выпуска - infra/release/.

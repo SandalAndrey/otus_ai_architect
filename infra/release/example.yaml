@@ -1,0 +1,54 @@
+# Образец записи реестра выпуска. Не настоящий выпуск: таких ещё не было.
+# Назначение полей - README.md рядом, обоснование - ADR-0020.
+
+release: "2026-11-14-a7f3c21"      # значение метки release на всех метриках
+
+code:
+  image: "registry.internal/assistant:a7f3c21"
+  commit: "a7f3c21e94b2f0d8c5a1e37b9f24d610ca8e5b73"
+  prompts_version: "1.4"           # версия промптов и схем агентов, внутри образа
+
+weights:
+  # Веса не обучаются, а закрепляются. Смена версии - отдельный вид выпуска:
+  # blue-green в окне плановых работ, канарейки для весов нет (ADR-0020).
+  llm:
+    name: "Qwen3-14B"
+    quant: "INT4"
+    sha256: "0000000000000000000000000000000000000000000000000000000000000000"
+    license: "Apache-2.0"
+  embedder:
+    name: "bge-m3"
+    sha256: "0000000000000000000000000000000000000000000000000000000000000000"
+    license: "MIT"
+  reranker:
+    name: "bge-reranker-v2-m3"
+    sha256: "0000000000000000000000000000000000000000000000000000000000000000"
+    license: "Apache-2.0"
+
+index:
+  collection: "catalog_v4_2"       # псевдоним переключается на неё
+  major: 4                         # сверяется онлайн-путём до поиска, ADR-0012
+  minor: 2                         # расхождение по мажору - отказ, а не тихая выдача
+  ingest_run_id: "dagster-2026-11-13-0417"
+  chunks: 184203
+  vectors: 184203                  # расхождение означает неполную индексацию
+
+gates:
+  fast:
+    passed: true
+    canaries: "15/15"              # C-01..C-15, docs/14-test-plan.md
+    report: "s3://gold/gates/fast/2026-11-14-a7f3c21.json"
+  full:
+    passed: true
+    faithfulness: 0.86             # порог 0.85
+    relevancy: 0.91                # порог 0.90
+    delta_vs_previous: -0.01       # просадка более 0.03 блокирует выпуск
+    report: "s3://gold/gates/full/2026-11-14-a7f3c21.json"
+
+rollout:
+  started: "2026-11-14T10:00:00+03:00"
+  completed: "2026-11-21T12:30:00+03:00"
+  stages_passed: [0, 1, 2, 3, 4]
+  rolled_back: false
+
+supersedes: "2026-10-30-3c1b8d9"   # держится горячей 72 часа после ступени 4

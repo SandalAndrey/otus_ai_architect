@@ -1,0 +1,108 @@
+# Конвейер поставки. Описание и обоснование - docs/16-delivery-pipeline.md.
+#
+# СОСТОЯНИЕ. Работает только задание docs: приложения ещё нет, раннера внутри
+# контура тоже. Остальные задания оставлены скелетами и отключены условием
+# if: false - чтобы структура была видна, но конвейер не падал на каждом
+# коммите. Условие снимается по мере появления кода, работа 3.1 плана работ.
+
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+
+  # --- Работает ---------------------------------------------------------
+
+  docs:
+    name: "Документация: только основные символы"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Проверка символов
+        run: |
+          python3 - <<'PY'
+          import glob, sys
+          BAD = {
+              '—': 'длинное тире',
+              '–': 'среднее тире',
+              '«': 'кавычка-ёлочка',
+              '»': 'кавычка-ёлочка',
+              '“': 'типографская кавычка',
+              '”': 'типографская кавычка',
+              '‘': 'типографская кавычка',
+              '’': 'типографская кавычка',
+              ' ': 'неразрывный пробел',
+              '…': 'многоточие одним символом',
+              '−': 'математический минус',
+              ' ': 'тонкий пробел',
+              ' ': 'узкий неразрывный пробел',
+              '×': 'знак умножения',
+          }
+          files = []
+          for ext in ('md', 'mmd', 'c4', 'yaml', 'yml', 'tf'):
+              files += glob.glob(f'**/*.{ext}', recursive=True)
+          failed = False
+          for path in sorted(set(files)):
+              text = open(path, encoding='utf-8').read()
+              for ch, name in BAD.items():
+                  if ch in text:
+                      line = text[:text.index(ch)].count('\n') + 1
+                      print(f'{path}:{line}: {name}')
+                      failed = True
+          sys.exit(1 if failed else 0)
+          PY
+
+  # --- Скелеты: включаются по мере появления кода ------------------------
+
+  unit:
+    name: Модульные тесты
+    if: false   # приложения ещё нет
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: pip install -r backend/requirements.txt
+      - run: ruff check backend
+      - run: mypy backend
+      - run: pytest backend/tests/unit
+
+  image:
+    name: Сборка образа и сканирование
+    if: false   # Dockerfile пока скелет, см. infra/Dockerfile
+    needs: [docs, unit]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Тег образа - хеш коммита: версия выпуска должна прослеживаться
+      # до строки кода (docs/16-delivery-pipeline.md, раздел 3.1).
+      - run: docker build -f infra/Dockerfile -t assistant:${{ github.sha }} .
+      - run: trivy image --severity HIGH,CRITICAL --exit-code 1 assistant:${{ github.sha }}
+
+  fast-gate:
+    name: "Быстрый гейт: канарейки, формат, гриф, источник"
+    if: false   # нужен раннер внутри контура: золотой датасет за периметр не уходит
+    needs: [image]
+    runs-on: [self-hosted, internal]
+    steps:
+      - uses: actions/checkout@v4
+      - run: make deploy-staging IMAGE=assistant:${{ github.sha }}
+      # Пятнадцать канареечных промптов C-01..C-15, docs/14-test-plan.md раздел 3.
+      # Ноль нарушений - условие блокирующее.
+      - run: make gate-fast
+
+  full-gate:
+    name: "Полный гейт: Ragas на золотом датасете"
+    if: false   # требует окна аренды GPU, часы прогона
+    needs: [fast-gate]
+    runs-on: [self-hosted, internal, gpu]
+    steps:
+      - uses: actions/checkout@v4
+      # Судья - локальная модель. Версия интерпретатора закреплена явно:
+      # Ragas тянет зависимости, отстающие от свежих версий Python.
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - run: make gate-full
+      - name: Запись в реестр выпуска
+        run: make release-manifest SHA=${{ github.sha }}
