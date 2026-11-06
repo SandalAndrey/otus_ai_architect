@@ -1,0 +1,55 @@
+%% Гипотетический контур на 10 000 RPS. Сценарий синтетический: действующие
+%% требования проекта - 2 RPS и p95 5 с (NFR-1). Разбор - homework/09.
+%% Доли трафика: 93 процента не доходят до генерации, 6.5 синхронно, 0.5 в очередь.
+%% Пересборка: npx @mermaid-js/mermaid-cli -i highload-architecture.mmd -o highload-architecture.png -s 3 -b white
+flowchart LR
+
+  U["Покупатель<br/>10 000 RPS"]
+  CDN["CDN: статика виджета,<br/>ответы грифа Public<br/>без живых полей"]
+  GW["Шлюз: роль, лимиты,<br/>класс вопроса<br/>по правилам, без модели"]
+
+  L0{"L0: точное совпадение<br/>хеш вопроса, прав<br/>и версии индекса"}
+  L1{"L1: каталог предрасчёта<br/>15 000 позиций<br/>x шаблоны вопросов"}
+  L2{"L2: семантический кэш<br/>только гриф Public,<br/>порог 0.93"}
+
+  EMB["Вопросный эмбеддер,<br/>лёгкий, 3 карты L4"]
+  LIVE["Шлюз учётной системы:<br/>остатки и сроки,<br/>подставляются поверх кэша"]
+
+  CLS{"Маршрут по классу"}
+
+  PRE["Пул prefill:<br/>контекст 8192,<br/>упирается в вычисления"]
+  DEC["Пул decode:<br/>упирается в полосу памяти,<br/>около 110 карт A100"]
+  Q[("Очередь тяжёлых:<br/>50 RPS")]
+  WRK["Воркеры очереди,<br/>KEDA по глубине"]
+  NTF["Уведомление:<br/>ответ готов"]
+
+  ANS["Ответ пользователю"]
+  INV["Смена версии индекса:<br/>инвалидация всех уровней"]
+
+  U --> CDN --> GW --> L0
+  L0 -- "попадание" --> LIVE
+  L0 -- "промах" --> L1
+  L1 -- "попадание" --> LIVE
+  L1 -- "промах" --> EMB --> L2
+  L2 -- "попадание" --> LIVE
+  L2 -- "промах" --> CLS
+  LIVE --> ANS
+
+  CLS -- "новый вопрос<br/>650 RPS" --> PRE --> DEC --> ANS
+  CLS -- "тяжёлый<br/>50 RPS" --> Q --> WRK --> NTF
+  DEC -. "запись ответа" .-> L2
+  WRK -. "запись ответа" .-> L1
+  INV -.-> L0
+  INV -.-> L1
+  INV -.-> L2
+
+  classDef step fill:#eef4fb,stroke:#5b7fa6
+  classDef gate fill:#fdf3e0,stroke:#b8863b
+  classDef store fill:#e8f2e8,stroke:#5f8a5f
+  classDef gpu fill:#f3e9f6,stroke:#8a5f9a
+  classDef warn fill:#fbeeee,stroke:#a65b5b
+  class U,CDN,GW,LIVE,ANS,NTF step
+  class L0,L1,L2,CLS gate
+  class Q store
+  class EMB,PRE,DEC,WRK gpu
+  class INV warn
